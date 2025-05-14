@@ -3,6 +3,8 @@ package com.UST.Apache_Camel.route;
 import com.UST.Apache_Camel.config.ApplicationConstants;
 import com.UST.Apache_Camel.config.InventoryUpdateComponents;
 import com.UST.Apache_Camel.exception.InventoryValidationException;
+import com.mongodb.MongoException;
+import org.apache.camel.Exchange;
 import org.apache.camel.builder.RouteBuilder;
 import org.apache.camel.model.dataformat.JsonDataFormat;
 import org.apache.camel.model.rest.RestBindingMode;
@@ -28,16 +30,28 @@ public class ItemRoute extends RouteBuilder {
     @Value("${app.error.categoryNotFound:Category not found}")
     private String categoryNotFoundMessage;
 
-    // Configures Camel routes for the Item Service, handling REST endpoints for item and category management,
-    // synchronous inventory updates, and asynchronous inventory updates via ActiveMQ
-    // Sets up REST configuration with JSON binding and defines routes for:
-    // - Retrieving, deleting, and listing items by ID or category
-    // - Creating new items and categories
-    // - Synchronous and asynchronous inventory updates
-    // Integrates with MongoDB for data storage and ActiveMQ for async processing, with logging for monitoring
     @Override
     public void configure() {
         logger.info("Configuring Camel routes for Item Service");
+
+        // Global exception handling for all routes
+        onException(InventoryValidationException.class)
+                .handled(true)
+                .bean(InventoryUpdateComponents.ErrorResponseProcessor.class, "processValidationError")
+                .log("Validation error: ${exception.message}")
+                .setHeader(Exchange.HTTP_RESPONSE_CODE, constant(400));
+
+        onException(MongoException.class)
+                .handled(true)
+                .bean(InventoryUpdateComponents.ErrorResponseProcessor.class, "processMongoError")
+                .log("MongoDB error: ${exception.message}")
+                .setHeader(Exchange.HTTP_RESPONSE_CODE, constant(500));
+
+        onException(Throwable.class)
+                .handled(true)
+                .bean(InventoryUpdateComponents.ErrorResponseProcessor.class, "processGenericError")
+                .log("Unexpected error: ${exception.message} at ${exception.stacktrace}")
+                .setHeader(Exchange.HTTP_RESPONSE_CODE, constant(500));
 
         JsonDataFormat jsonDataFormat = new JsonDataFormat();
         jsonDataFormat.setObjectMapper(objectMapper.toString());
@@ -51,14 +65,10 @@ public class ItemRoute extends RouteBuilder {
                 .dataFormatProperty("json.in.disableFeatures", "FAIL_ON_UNKNOWN_PROPERTIES");
 
         // Item management routes
-        // GET /camel/mycart/item/{itemId}: Retrieves an item by ID from MongoDB
-        // DELETE /camel/mycart/item/{itemId}: Deletes an item by ID after verifying its existence
         rest("/mycart/item/{itemId}")
                 .get().to(ApplicationConstants.DIRECT_PREFIX + ApplicationConstants.ENDPOINT_GET_ITEM_BY_ID)
                 .delete().to(ApplicationConstants.DIRECT_PREFIX + ApplicationConstants.ENDPOINT_DELETE_ITEM);
 
-        // Route for retrieving an item by ID
-        // Uses GetItemProcessor to set the item ID and process the MongoDB result
         from(ApplicationConstants.DIRECT_PREFIX + ApplicationConstants.ENDPOINT_GET_ITEM_BY_ID)
                 .routeId(ApplicationConstants.ROUTE_GET_ITEM_BY_ID)
                 .log("Fetching item with ID: ${header.itemId}")
@@ -67,8 +77,6 @@ public class ItemRoute extends RouteBuilder {
                         ApplicationConstants.MONGO_DATABASE, ApplicationConstants.MONGO_ITEM_READ_COLLECTION))
                 .bean(InventoryUpdateComponents.GetItemProcessor.class, "processResult");
 
-        // Route for deleting an item by ID
-        // Checks if the item exists, deletes it from MongoDB, and handles success or not-found cases
         from(ApplicationConstants.DIRECT_PREFIX + ApplicationConstants.ENDPOINT_DELETE_ITEM)
                 .routeId(ApplicationConstants.ROUTE_DELETE_ITEM)
                 .log("Deleting item with ID: ${header.itemId}")
@@ -84,9 +92,6 @@ public class ItemRoute extends RouteBuilder {
                 .bean(InventoryUpdateComponents.DeleteItemProcessor.class, "handleDeleteSuccess")
                 .end();
 
-        // Route for listing items by category
-        // GET /camel/mycart/items/{categoryId}?includeSpecial={boolean}: Retrieves items for a category,
-        // optionally including special products, using MongoDB aggregation
         rest("/mycart/items/{categoryId}")
                 .get()
                 .param()
@@ -98,8 +103,6 @@ public class ItemRoute extends RouteBuilder {
                 .endParam()
                 .to(ApplicationConstants.DIRECT_PREFIX + ApplicationConstants.ENDPOINT_GET_ITEMS_BY_CATEGORY);
 
-        // Processes the category items request
-        // Builds an aggregation pipeline and processes the MongoDB results using GetItemsByCategoryProcessor
         from(ApplicationConstants.DIRECT_PREFIX + ApplicationConstants.ENDPOINT_GET_ITEMS_BY_CATEGORY)
                 .routeId(ApplicationConstants.ROUTE_GET_ITEMS_BY_CATEGORY)
                 .bean(InventoryUpdateComponents.GetItemsByCategoryProcessor.class, "buildAggregationPipeline")
@@ -107,15 +110,11 @@ public class ItemRoute extends RouteBuilder {
                         ApplicationConstants.MONGO_DATABASE, ApplicationConstants.MONGO_ITEM_READ_COLLECTION))
                 .bean(InventoryUpdateComponents.GetItemsByCategoryProcessor.class, "processResult");
 
-        // Route for creating a new item
-        // POST /camel/mycart: Creates a new item after validating it and checking category existence
         rest("/mycart")
                 .post()
                 .consumes("application/json")
                 .to(ApplicationConstants.DIRECT_PREFIX + ApplicationConstants.ENDPOINT_POST_NEW_ITEM);
 
-        // Validates and inserts a new item
-        // Checks for existing items, validates the category, and inserts into MongoDB
         from(ApplicationConstants.DIRECT_PREFIX + ApplicationConstants.ENDPOINT_POST_NEW_ITEM)
                 .routeId(ApplicationConstants.ROUTE_POST_NEW_ITEM)
                 .log("Received new item: ${body}")
@@ -140,9 +139,6 @@ public class ItemRoute extends RouteBuilder {
                 .endChoice()
                 .endChoice();
 
-        // Category management routes
-        // POST /camel/mycart/category: Creates a new category
-        // DELETE /camel/mycart/category/{categoryId}: Deletes a category by ID
         rest("/mycart/category")
                 .post()
                 .consumes("application/json")
@@ -150,11 +146,8 @@ public class ItemRoute extends RouteBuilder {
                 .delete("/{categoryId}")
                 .to(ApplicationConstants.DIRECT_PREFIX + ApplicationConstants.ENDPOINT_DELETE_CATEGORY);
 
-        // Route for creating a new category
-        // Validates and inserts a new category, checking for duplicates
         from(ApplicationConstants.DIRECT_PREFIX + ApplicationConstants.ENDPOINT_POST_NEW_CATEGORY)
                 .routeId(ApplicationConstants.ROUTE_POST_NEW_CATEGORY)
-                .errorHandler(noErrorHandler())
                 .log("Received new category: ${body}")
                 .bean(InventoryUpdateComponents.PostNewCategoryProcessor.class, "validateCategory")
                 .to(String.format(ApplicationConstants.MONGO_CATEGORY_FIND_BY_ID,
@@ -168,8 +161,6 @@ public class ItemRoute extends RouteBuilder {
                 .otherwise()
                 .bean(InventoryUpdateComponents.PostNewCategoryProcessor.class, "handleExistingCategory");
 
-        // Route for deleting a category by ID
-        // Verifies the category exists before deleting it from MongoDB
         from(ApplicationConstants.DIRECT_PREFIX + ApplicationConstants.ENDPOINT_DELETE_CATEGORY)
                 .routeId(ApplicationConstants.ROUTE_DELETE_CATEGORY)
                 .log("Deleting category with ID: ${header.categoryId}")
@@ -185,29 +176,17 @@ public class ItemRoute extends RouteBuilder {
                 .bean(InventoryUpdateComponents.DeleteCategoryProcessor.class, "handleDeleteSuccess")
                 .end();
 
-        // Synchronous inventory update route
-        // POST /camel/inventory/update: Updates item stock details synchronously and returns results
         rest("/inventory/update")
                 .post()
                 .consumes("application/json")
                 .produces("application/json")
                 .to(ApplicationConstants.DIRECT_PREFIX + ApplicationConstants.ENDPOINT_PROCESS_INVENTORY_UPDATE);
 
-        // Orchestrates synchronous inventory update
-        // Handles exceptions and finalizes the response using ErrorResponseProcessor and FinalResponseProcessor
         from(ApplicationConstants.DIRECT_PREFIX + ApplicationConstants.ENDPOINT_PROCESS_INVENTORY_UPDATE)
                 .routeId(ApplicationConstants.ROUTE_PROCESS_INVENTORY_UPDATE)
-                .errorHandler(noErrorHandler())
-                .doTry()
                 .to(ApplicationConstants.DIRECT_PREFIX + ApplicationConstants.ENDPOINT_UPDATE_INVENTORY)
-                .doCatch(Exception.class)
-                .bean(InventoryUpdateComponents.ErrorResponseProcessor.class)
-                .doFinally()
-                .bean(InventoryUpdateComponents.FinalResponseProcessor.class)
-                .end();
+                .bean(InventoryUpdateComponents.FinalResponseProcessor.class);
 
-        // Processes synchronous inventory updates
-        // Splits the item list, validates and updates each item in MongoDB, and aggregates results
         from(ApplicationConstants.DIRECT_PREFIX + ApplicationConstants.ENDPOINT_UPDATE_INVENTORY)
                 .routeId(ApplicationConstants.ROUTE_UPDATE_INVENTORY)
                 .bean(InventoryUpdateComponents.PayloadValidationProcessor.class)
@@ -230,30 +209,21 @@ public class ItemRoute extends RouteBuilder {
                 .end()
                 .log("Split completed, itemResults: ${exchangeProperty.itemResults}");
 
-        // Asynchronous inventory update route
-        // POST /camel/inventory/async-update: Enqueues item updates to ActiveMQ and returns a correlation ID
         rest("/inventory/async-update")
                 .post()
                 .consumes("application/json")
                 .produces("application/json")
                 .to(ApplicationConstants.DIRECT_PREFIX + ApplicationConstants.ENDPOINT_ASYNC_INVENTORY_UPDATE);
 
-        // Processes asynchronous inventory updates
-        // Validates the payload, generates a correlation ID, splits items, and sends them to ActiveMQ in parallel
-        // Uses parallelProcessing to handle each item concurrently, improving performance for large item lists
         from(ApplicationConstants.DIRECT_PREFIX + ApplicationConstants.ENDPOINT_ASYNC_INVENTORY_UPDATE)
                 .routeId(ApplicationConstants.ROUTE_ASYNC_INVENTORY_UPDATE)
-                .onException(Exception.class)
-                .handled(true)
-                .bean(InventoryUpdateComponents.AsyncInventoryUpdateProcessor.class, "handleException")
-                .end()
                 .bean(InventoryUpdateComponents.PayloadValidationProcessor.class)
                 .bean(InventoryUpdateComponents.AsyncInventoryUpdateProcessor.class, "initializeCorrelationId")
                 .split(simple("${exchangeProperty.inventoryList}"))
-                .parallelProcessing() // Enables parallel processing for split items
+                .parallelProcessing()
                 .bean(InventoryUpdateComponents.AsyncInventoryUpdateProcessor.class, "prepareQueueMessage")
                 .log("Sending item to ActiveMQ queue: ${header.JMSCorrelationID}")
-                .to(String.format(ApplicationConstants.AMQ_INVENTORY_UPDATE_WRITE ,
+                .to(String.format(ApplicationConstants.AMQ_INVENTORY_UPDATE_WRITE,
                         ApplicationConstants.AMQ_INVENTORY_UPDATE_WRITE_QUEUE))
                 .end()
                 .bean(InventoryUpdateComponents.AsyncInventoryUpdateProcessor.class, "buildEnqueueResponse");

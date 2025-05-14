@@ -1,6 +1,7 @@
 package com.UST.Apache_Camel.config;
 
 import com.UST.Apache_Camel.exception.InventoryValidationException;
+import com.mongodb.MongoException;
 import org.apache.camel.AggregationStrategy;
 import org.apache.camel.Exchange;
 import org.apache.camel.Processor;
@@ -13,14 +14,13 @@ import java.time.LocalDateTime;
 import java.util.*;
 
 public class InventoryUpdateComponents {
+
     private static final Logger logger = LoggerFactory.getLogger(InventoryUpdateComponents.class);
 
     public static class ItemAggregationStrategy implements AggregationStrategy {
+
         private static final Logger logger = LoggerFactory.getLogger(ItemAggregationStrategy.class);
 
-        // Aggregates item processing results during split operations in inventory update routes
-        // Combines itemResult from each newExchange into a list (itemResults) in the resultExchange
-        // Initializes itemResults if null and logs warnings for null itemResult cases
         @Override
         public Exchange aggregate(Exchange oldExchange, Exchange newExchange) {
             List itemResults = oldExchange != null
@@ -47,10 +47,6 @@ public class InventoryUpdateComponents {
     }
 
     public static class PayloadValidationProcessor implements Processor {
-        // Validates the incoming inventory update payload for synchronous and asynchronous routes
-        // Ensures the payload is a valid JSON map with a non-empty 'items' list
-        // Initializes itemResults and sets inventoryList as exchange properties
-        // Throws InventoryValidationException for invalid or missing data
         @Override
         public void process(Exchange exchange) throws Exception {
             Object body = exchange.getIn().getBody();
@@ -84,15 +80,10 @@ public class InventoryUpdateComponents {
     }
 
     public static class ItemProcessor implements Processor {
-        // Placeholder method required by the Processor interface, not used in this implementation
         @Override
         public void process(Exchange exchange) throws Exception {
         }
 
-        // Validates an individual item in the inventory update payload
-        // Ensures the item has '_id' and 'stockDetails' with 'soldOut' and 'damaged' fields
-        // Sets itemId, soldOut, and damaged as exchange properties for later use
-        // Throws InventoryValidationException if validation fails
         public void processItem(Exchange exchange) throws Exception {
             Map<String, Object> item = exchange.getIn().getBody(Map.class);
             if (item == null || item.get("_id") == null || item.get("stockDetails") == null) {
@@ -115,18 +106,12 @@ public class InventoryUpdateComponents {
             logger.debug("Processing item: {}", id);
         }
 
-        // Prepares the item ID for MongoDB findById operation
-        // Sets the itemId from exchange properties as the message body for querying MongoDB
         public void setItemId(Exchange exchange) {
             String itemId = exchange.getProperty("itemId", String.class);
             exchange.getIn().setBody(itemId);
             logger.debug("Set itemId for findById: {}", itemId);
         }
 
-        // Validates and updates an item's stock details after retrieval from MongoDB
-        // Checks if the item exists, validates stock availability, and updates availableStock, soldOut, and damaged
-        // Sets the updated item in the exchange body and as a property for saving
-        // Throws InventoryValidationException for missing items or insufficient stock
         public void validateAndUpdateItem(Exchange exchange) throws Exception {
             Map<String, Object> item = exchange.getIn().getBody(Map.class);
             if (item == null) {
@@ -160,8 +145,6 @@ public class InventoryUpdateComponents {
             exchange.getIn().setBody(item);
         }
 
-        // Marks a successful inventory update for an item
-        // Creates a result map with itemId, status, and success message, stores it in exchange properties, and logs the success
         public void markSuccess(Exchange exchange) {
             String itemId = exchange.getProperty("itemId", String.class);
             Map<String, Object> itemResult = new HashMap<>();
@@ -172,8 +155,6 @@ public class InventoryUpdateComponents {
             logger.info("✅ Inventory updated for {}", itemId);
         }
 
-        // Marks a failed inventory update for an item
-        // Retrieves the caught exception, creates a result map with itemId, status, and error message, and logs the failure
         public void markFailure(Exchange exchange) {
             String itemId = exchange.getProperty("itemId", String.class);
             InventoryValidationException e = exchange.getProperty(Exchange.EXCEPTION_CAUGHT, InventoryValidationException.class);
@@ -188,11 +169,9 @@ public class InventoryUpdateComponents {
     }
 
     public static class ErrorResponseProcessor implements Processor {
-        // Handles exceptions caught during synchronous inventory update processing
-        // Sets an error response in the exchange body with a 400 status code and the exception message
-        // Clears the caught exception from exchange properties
         @Override
         public void process(Exchange exchange) throws Exception {
+            // Deprecated: Use specific methods below
             Exception e = exchange.getProperty(Exchange.EXCEPTION_CAUGHT, Exception.class);
             String errorMessage = e.getMessage();
             logger.warn("Request failed: {}", errorMessage);
@@ -203,12 +182,45 @@ public class InventoryUpdateComponents {
             exchange.getMessage().setHeader(Exchange.HTTP_RESPONSE_CODE, 400);
             exchange.removeProperty(Exchange.EXCEPTION_CAUGHT);
         }
+
+        public void processValidationError(Exchange exchange) {
+            InventoryValidationException e = exchange.getProperty(Exchange.EXCEPTION_CAUGHT, InventoryValidationException.class);
+            String errorMessage = e.getMessage();
+            logger.warn("Validation error: {}", errorMessage);
+            exchange.getMessage().setBody(Map.of(
+                    "status", "error",
+                    "message", errorMessage
+            ));
+            exchange.getMessage().setHeader(Exchange.HTTP_RESPONSE_CODE, 400);
+            exchange.removeProperty(Exchange.EXCEPTION_CAUGHT);
+        }
+
+        public void processMongoError(Exchange exchange) {
+            MongoException e = exchange.getProperty(Exchange.EXCEPTION_CAUGHT, MongoException.class);
+            String errorMessage = "MongoDB error: " + e.getMessage();
+            logger.error("MongoDB error: {}", errorMessage, e);
+            exchange.getMessage().setBody(Map.of(
+                    "status", "error",
+                    "message", errorMessage
+            ));
+            exchange.getMessage().setHeader(Exchange.HTTP_RESPONSE_CODE, 500);
+            exchange.removeProperty(Exchange.EXCEPTION_CAUGHT);
+        }
+
+        public void processGenericError(Exchange exchange) {
+            Throwable t = exchange.getProperty(Exchange.EXCEPTION_CAUGHT, Throwable.class);
+            String errorMessage = "Unexpected error: " + t.getMessage();
+            logger.error("Unexpected error: {}", errorMessage, t);
+            exchange.getMessage().setBody(Map.of(
+                    "status", "error",
+                    "message", errorMessage
+            ));
+            exchange.getMessage().setHeader(Exchange.HTTP_RESPONSE_CODE, 500);
+            exchange.removeProperty(Exchange.EXCEPTION_CAUGHT);
+        }
     }
 
     public static class FinalResponseProcessor implements Processor {
-        // Finalizes the response for synchronous inventory updates
-        // Aggregates itemResults, determines overall status (completed or partial), and sets a 200 response with results
-        // Initializes itemResults as an empty list if null and logs the final status
         @Override
         public void process(Exchange exchange) throws Exception {
             List<Map<String, Object>> itemResults = exchange.getProperty("itemResults", List.class);
@@ -229,16 +241,12 @@ public class InventoryUpdateComponents {
     public static class GetItemProcessor implements Processor {
         private static final Logger logger = LoggerFactory.getLogger(GetItemProcessor.class);
 
-        // Prepares the item ID for MongoDB findById operation in the get item route
-        // Retrieves itemId from the exchange header and sets it as the message body
         public void setItemId(Exchange exchange) {
             String itemId = exchange.getIn().getHeader("itemId", String.class);
             exchange.getIn().setBody(itemId);
             logger.debug("Set itemId for findById: {}", itemId);
         }
 
-        // Processes the result of the MongoDB findById operation for item retrieval
-        // Sets a 404 response if the item is not found, or a 200 response with the item data if found
         public void processResult(Exchange exchange) {
             if (exchange.getIn().getBody() == null) {
                 logger.info("Item not found for ID: {}", exchange.getIn().getHeader("itemId"));
@@ -250,7 +258,6 @@ public class InventoryUpdateComponents {
             }
         }
 
-        // Placeholder method required by the Processor interface, not used in this implementation
         @Override
         public void process(Exchange exchange) throws Exception {
         }
@@ -259,9 +266,6 @@ public class InventoryUpdateComponents {
     public static class GetItemsByCategoryProcessor implements Processor {
         private static final Logger logger = LoggerFactory.getLogger(GetItemsByCategoryProcessor.class);
 
-        // Builds a MongoDB aggregation pipeline for retrieving items by category
-        // Includes optional filtering for special products and joins with the category collection
-        // Sets the pipeline as the exchange body for MongoDB execution
         public void buildAggregationPipeline(Exchange exchange) {
             String categoryId = exchange.getIn().getHeader("categoryId", String.class);
             boolean includeSpecial = Boolean.parseBoolean(exchange.getIn().getHeader("includeSpecial", "false", String.class));
@@ -306,8 +310,6 @@ public class InventoryUpdateComponents {
             logger.debug("Built aggregation pipeline for categoryId: {}, includeSpecial: {}", categoryId, includeSpecial);
         }
 
-        // Processes the MongoDB aggregation result for items by category
-        // Sets an empty response with a message if no items are found, or the result list if items exist
         public void processResult(Exchange exchange) {
             List<?> result = exchange.getIn().getBody(List.class);
             if (result == null || result.isEmpty()) {
@@ -322,7 +324,6 @@ public class InventoryUpdateComponents {
             }
         }
 
-        // Placeholder method required by the Processor interface, not used in this implementation
         @Override
         public void process(Exchange exchange) throws Exception {
         }
@@ -331,9 +332,6 @@ public class InventoryUpdateComponents {
     public static class PostNewItemProcessor implements Processor {
         private static final Logger logger = LoggerFactory.getLogger(PostNewItemProcessor.class);
 
-        // Validates a new item payload for the POST /mycart endpoint
-        // Checks for valid base and selling prices, sets the item as a property, and prepares itemId for MongoDB lookup
-        // Throws IllegalArgumentException for invalid prices
         public void validateItem(Exchange exchange) throws Exception {
             Map<String, Object> item = exchange.getIn().getBody(Map.class);
             exchange.setProperty("newItem", item);
@@ -350,16 +348,12 @@ public class InventoryUpdateComponents {
             logger.debug("Validated item and set itemId for findById: {}", itemId);
         }
 
-        // Handles the case where an item already exists in MongoDB
-        // Sets a 400 response with an error message indicating the item already exists
         public void handleExistingItem(Exchange exchange) {
             exchange.getIn().setHeader(Exchange.HTTP_RESPONSE_CODE, 400);
             exchange.getIn().setBody(Map.of("message", ApplicationConstants.ERROR_ITEM_ALREADY_EXISTS));
             logger.warn("Item already exists: {}", exchange.getProperty("newItem", Map.class).get("_id"));
         }
 
-        // Prepares the category ID for MongoDB lookup to validate the category
-        // Stores the validated item and sets categoryId as the message body
         public void setCategoryId(Exchange exchange) {
             Map<String, Object> item = exchange.getProperty("newItem", Map.class);
             exchange.setProperty("validatedItem", item);
@@ -368,31 +362,24 @@ public class InventoryUpdateComponents {
             logger.debug("Set categoryId for findById: {}", categoryId);
         }
 
-        // Handles the case where the category is invalid (not found in MongoDB)
-        // Sets a 400 response with an error message indicating the category is invalid
         public void handleInvalidCategory(Exchange exchange) {
             exchange.getIn().setHeader(Exchange.HTTP_RESPONSE_CODE, 400);
             exchange.getIn().setBody(Map.of("message", ApplicationConstants.ERROR_CATEGORY_NOT_FOUND));
             logger.warn("Invalid category for item: {}", exchange.getProperty("validatedItem", Map.class).get("_id"));
         }
 
-        // Prepares the validated item for insertion into MongoDB
-        // Sets the validated item as the exchange body for the insert operation
         public void prepareItemForInsert(Exchange exchange) {
             Map<String, Object> item = exchange.getProperty("validatedItem", Map.class);
             exchange.getIn().setBody(item);
             logger.debug("Prepared item for insert: {}", item.get("_id"));
         }
 
-        // Handles a successful item insertion
-        // Sets a 201 response with a success message and logs the insertion
         public void handleInsertSuccess(Exchange exchange) {
             exchange.getIn().setHeader(Exchange.HTTP_RESPONSE_CODE, 201);
             exchange.getIn().setBody(Map.of("message", "Item inserted successfully"));
             logger.info("Successfully inserted item: {}", exchange.getProperty("validatedItem", Map.class).get("_id"));
         }
 
-        // Placeholder method required by the Processor interface, not used in this implementation
         @Override
         public void process(Exchange exchange) throws Exception {
         }
@@ -401,14 +388,10 @@ public class InventoryUpdateComponents {
     public static class PostNewCategoryProcessor implements Processor {
         private static final Logger logger = LoggerFactory.getLogger(PostNewCategoryProcessor.class);
 
-        // Placeholder method required by the Processor interface, not used in this implementation
         @Override
         public void process(Exchange exchange) throws Exception {
         }
 
-        // Validates a new category payload for the POST /mycart/category endpoint
-        // Ensures categoryId and categoryName are non-empty, sets the category as a property, and prepares categoryId for lookup
-        // Throws IllegalArgumentException for invalid fields
         public void validateCategory(Exchange exchange) throws Exception {
             Map<String, Object> category = exchange.getIn().getBody(Map.class);
             exchange.setProperty("newCategory", category);
@@ -424,24 +407,18 @@ public class InventoryUpdateComponents {
             logger.debug("Validated category and set categoryId for findById: {}", categoryId);
         }
 
-        // Prepares the validated category for insertion into MongoDB
-        // Sets the category as the exchange body for the insert operation
         public void prepareCategoryForInsert(Exchange exchange) {
             Map<String, Object> category = exchange.getProperty("newCategory", Map.class);
             exchange.getIn().setBody(category);
             logger.debug("Prepared category for insert: {}", category.get("_id"));
         }
 
-        // Handles a successful category insertion
-        // Sets a 201 response with a success message and logs the insertion
         public void handleInsertSuccess(Exchange exchange) {
             exchange.getIn().setHeader(Exchange.HTTP_RESPONSE_CODE, 201);
             exchange.getIn().setBody(Map.of("message", "Category inserted successfully"));
             logger.info("Successfully inserted category: {}", exchange.getProperty("newCategory", Map.class).get("_id"));
         }
 
-        // Handles the case where a category already exists in MongoDB
-        // Sets a 400 response with an error message indicating the category already exists
         public void handleExistingCategory(Exchange exchange) {
             exchange.getIn().setHeader(Exchange.HTTP_RESPONSE_CODE, 400);
             exchange.getIn().setBody(Map.of("message", ApplicationConstants.ERROR_CATEGORY_ALREADY_EXISTS));
@@ -452,31 +429,24 @@ public class InventoryUpdateComponents {
     public static class DeleteItemProcessor implements Processor {
         private static final Logger logger = LoggerFactory.getLogger(DeleteItemProcessor.class);
 
-        // Prepares the item ID for MongoDB lookup in the delete item route
-        // Retrieves itemId from the exchange header and sets it as the message body
         public void setItemId(Exchange exchange) {
             String itemId = exchange.getIn().getHeader("itemId", String.class);
             exchange.getIn().setBody(itemId);
             logger.debug("Set itemId for deletion: {}", itemId);
         }
 
-        // Handles the case where an item is not found during deletion
-        // Sets a 404 response with an error message indicating the item was not found
         public void handleItemNotFound(Exchange exchange) {
             exchange.getIn().setHeader(Exchange.HTTP_RESPONSE_CODE, 404);
             exchange.getIn().setBody(Map.of("message", ApplicationConstants.ERROR_ITEM_NOT_FOUND));
             logger.warn("Item not found for deletion: {}", exchange.getIn().getHeader("itemId"));
         }
 
-        // Handles a successful item deletion
-        // Sets a 200 response with a success message and logs the deletion
         public void handleDeleteSuccess(Exchange exchange) {
             exchange.getIn().setHeader(Exchange.HTTP_RESPONSE_CODE, 200);
             exchange.getIn().setBody(Map.of("message", "Item deleted successfully"));
             logger.info("Successfully deleted item: {}", exchange.getIn().getHeader("itemId"));
         }
 
-        // Placeholder method required by the Processor interface, not used in this implementation
         @Override
         public void process(Exchange exchange) throws Exception {
         }
@@ -485,31 +455,24 @@ public class InventoryUpdateComponents {
     public static class DeleteCategoryProcessor implements Processor {
         private static final Logger logger = LoggerFactory.getLogger(DeleteCategoryProcessor.class);
 
-        // Prepares the category ID for MongoDB lookup in the delete category route
-        // Retrieves categoryId from the exchange header and sets it as the message body
         public void setCategoryId(Exchange exchange) {
             String categoryId = exchange.getIn().getHeader("categoryId", String.class);
             exchange.getIn().setBody(categoryId);
             logger.debug("Set categoryId for deletion: {}", categoryId);
         }
 
-        // Handles the case where a category is not found during deletion
-        // Sets a 404 response with an error message indicating the category was not found
         public void handleCategoryNotFound(Exchange exchange) {
             exchange.getIn().setHeader(Exchange.HTTP_RESPONSE_CODE, 404);
             exchange.getIn().setBody(Map.of("message", ApplicationConstants.ERROR_CATEGORY_NOT_FOUND));
             logger.warn("Category not found for deletion: {}", exchange.getIn().getHeader("categoryId"));
         }
 
-        // Handles a successful category deletion
-        // Sets a 200 response with a success message and logs the deletion
         public void handleDeleteSuccess(Exchange exchange) {
             exchange.getIn().setHeader(Exchange.HTTP_RESPONSE_CODE, 200);
             exchange.getIn().setBody(Map.of("message", "Category deleted successfully"));
             logger.info("Successfully deleted category: {}", exchange.getIn().getHeader("categoryId"));
         }
 
-        // Placeholder method required by the Processor interface, not used in this implementation
         @Override
         public void process(Exchange exchange) throws Exception {
         }
@@ -518,8 +481,6 @@ public class InventoryUpdateComponents {
     public static class AsyncInventoryUpdateProcessor implements Processor {
         private static final Logger logger = LoggerFactory.getLogger(AsyncInventoryUpdateProcessor.class);
 
-        // Handles exceptions during asynchronous inventory update processing
-        // Sets a 500 response with an error message and logs the exception details
         public void handleException(Exchange exchange) {
             Exception exception = exchange.getProperty(Exchange.EXCEPTION_CAUGHT, Exception.class);
             String errorMessage = exception != null ? exception.getMessage() : "Unknown error";
@@ -531,8 +492,6 @@ public class InventoryUpdateComponents {
             ));
         }
 
-        // Initializes a correlation ID for tracking asynchronous inventory updates
-        // Generates a UUID, sets it as an exchange property, and adds it to the JMS header
         public void initializeCorrelationId(Exchange exchange) {
             String correlationId = UUID.randomUUID().toString();
             exchange.setProperty("correlationId", correlationId);
@@ -540,8 +499,6 @@ public class InventoryUpdateComponents {
             logger.info("Generated correlationId: {}", correlationId);
         }
 
-        // Prepares an item for queuing in ActiveMQ
-        // Sets the item as the exchange body and ensures the correlationId is included in the JMS header
         public void prepareQueueMessage(Exchange exchange) {
             Map<String, Object> item = exchange.getIn().getBody(Map.class);
             exchange.getIn().setBody(item);
@@ -549,8 +506,6 @@ public class InventoryUpdateComponents {
             logger.debug("Prepared queue message for itemId: {}", item.get("_id"));
         }
 
-        // Builds the response for successful enqueuing of asynchronous updates
-        // Sets a 202 response with the correlationId and a status indicating the items were enqueued
         public void buildEnqueueResponse(Exchange exchange) {
             String correlationId = exchange.getProperty("correlationId", String.class);
             exchange.getIn().setHeader(Exchange.HTTP_RESPONSE_CODE, 202);
@@ -561,7 +516,6 @@ public class InventoryUpdateComponents {
             logger.info("Enqueued items with correlationId: {}", correlationId);
         }
 
-        // Placeholder method required by the Processor interface, not used in this implementation
         @Override
         public void process(Exchange exchange) throws Exception {
         }

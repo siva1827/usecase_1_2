@@ -88,22 +88,22 @@
         </dependency>
 
         <!-- ActiveMQ Client -->
-        <dependency>
-            <groupId>org.apache.activemq</groupId>
-            <artifactId>activemq-client</artifactId>
-            <version>${activemq.version}</version>
-            <exclusions>
-                <exclusion>
-                    <groupId>jakarta.jms</groupId>
-                    <artifactId>jakarta.jms-api</artifactId>
-                </exclusion>
-            </exclusions>
-        </dependency>
-        <dependency>
-            <groupId>org.apache.activemq</groupId>
-            <artifactId>activemq-broker</artifactId>
-            <version>${activemq.version}</version>
-        </dependency>
+<!--        <dependency>-->
+<!--            <groupId>org.apache.activemq</groupId>-->
+<!--            <artifactId>activemq-client</artifactId>-->
+<!--            <version>${activemq.version}</version>-->
+<!--            <exclusions>-->
+<!--                <exclusion>-->
+<!--                    <groupId>jakarta.jms</groupId>-->
+<!--                    <artifactId>jakarta.jms-api</artifactId>-->
+<!--                </exclusion>-->
+<!--            </exclusions>-->
+<!--        </dependency>-->
+<!--        <dependency>-->
+<!--            <groupId>org.apache.activemq</groupId>-->
+<!--            <artifactId>activemq-broker</artifactId>-->
+<!--            <version>${activemq.version}</version>-->
+<!--        </dependency>-->
 
         <!-- JMS API -->
         <dependency>
