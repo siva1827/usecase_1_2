@@ -1,10 +1,13 @@
 package com.UST.Apache_Camel.processors;
 
+import com.UST.Apache_Camel.exception.InventoryValidationException;
 import org.apache.camel.Exchange;
 import org.apache.camel.Processor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.jms.UncategorizedJmsException;
 
+import javax.jms.JMSException;
 import java.time.LocalDateTime;
 import java.util.HashMap;
 import java.util.Map;
@@ -14,6 +17,39 @@ public class AsyncInventoryUpdateProcessor implements Processor {
     private static final Logger logger = LoggerFactory.getLogger(AsyncInventoryUpdateProcessor.class);
 
     // Placeholder method required by the Processor interface, not used in this implementation
+
+    public void handleException(Exchange exchange) {
+        Exception exception = exchange.getProperty(Exchange.EXCEPTION_CAUGHT, Exception.class);
+        String correlationId = exchange.getProperty("correlationId", String.class);
+        String errorMessage;
+        int httpStatus;
+
+        if (exception instanceof UncategorizedJmsException || exception instanceof JMSException) {
+            errorMessage = "Something went wrong with ActiveMQ";
+            httpStatus = 503;
+            logger.warn("JMS error for correlationId {}: {}", correlationId, errorMessage);
+        } else if (exception instanceof InventoryValidationException) {
+            errorMessage = exception.getMessage();
+            httpStatus = 400;
+            logger.warn("Validation error for correlationId {}: {}", correlationId, errorMessage);
+        } else {
+            errorMessage = exception != null ? exception.getMessage() : "Unknown error";
+            httpStatus = 500;
+            logger.error("Error in async update for correlationId {}: {}", correlationId, errorMessage, exception);
+        }
+
+        // Clear exchange properties
+        exchange.removeProperty("correlationId");
+        exchange.removeProperty("inventoryList");
+        exchange.removeProperty(Exchange.EXCEPTION_CAUGHT);
+
+        // Set response
+        exchange.getIn().setHeader(Exchange.HTTP_RESPONSE_CODE, httpStatus);
+        exchange.getIn().setBody(Map.of(
+                "status", "error",
+                "message", errorMessage
+        ));
+    }
     @Override
     public void process(Exchange exchange) throws Exception {
     }
