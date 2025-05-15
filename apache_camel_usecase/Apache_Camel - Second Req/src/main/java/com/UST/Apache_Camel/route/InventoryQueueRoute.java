@@ -1,8 +1,9 @@
 package com.UST.Apache_Camel.route;
 
 import com.UST.Apache_Camel.config.ApplicationConstants;
-import com.UST.Apache_Camel.config.InventoryUpdateComponents;
 import com.UST.Apache_Camel.exception.InventoryValidationException;
+import com.UST.Apache_Camel.processors.AsyncInventoryUpdateProcessor;
+import com.UST.Apache_Camel.processors.ItemProcessor;
 import org.apache.camel.builder.RouteBuilder;
 import org.springframework.stereotype.Component;
 
@@ -24,24 +25,24 @@ public class InventoryQueueRoute extends RouteBuilder {
                 .routeId(ApplicationConstants.ROUTE_PROCESS_INVENTORY_QUEUE)
                 .onException(Exception.class)
                 .handled(true)
-                .bean(InventoryUpdateComponents.AsyncInventoryUpdateProcessor.class, "handleQueueException")
+                .bean(AsyncInventoryUpdateProcessor.class, "handleQueueException")
                 .end()
                 .log("Processing inventory item from queue: ${body}, correlationId: ${header.JMSCorrelationID}")
                 .doTry()
-                .bean(InventoryUpdateComponents.ItemProcessor.class, "processItem")
+                .bean(ItemProcessor.class, "processItem")
                 .log("Processing item: ${exchangeProperty.itemId}")
-                .bean(InventoryUpdateComponents.ItemProcessor.class, "setItemId")
+                .bean(ItemProcessor.class, "setItemId")
                 .to(String.format(ApplicationConstants.MONGO_ITEM_FIND_BY_ID,
                         ApplicationConstants.MONGO_DATABASE, ApplicationConstants.MONGO_ITEM_READ_COLLECTION))
-                .bean(InventoryUpdateComponents.ItemProcessor.class, "validateAndUpdateItem")
+                .bean(ItemProcessor.class, "validateAndUpdateItem")
                 .to(String.format(ApplicationConstants.MONGO_ITEM_SAVE,
                         ApplicationConstants.MONGO_DATABASE, ApplicationConstants.MONGO_ITEM_WRITE_COLLECTION))
-                .bean(InventoryUpdateComponents.ItemProcessor.class, "markSuccess")
+                .bean(ItemProcessor.class, "markSuccess")
                 .doCatch(InventoryValidationException.class)
-                .bean(InventoryUpdateComponents.ItemProcessor.class, "markFailure")
+                .bean(ItemProcessor.class, "markFailure")
                 .end()
                 .log("Completed processing item ${exchangeProperty.itemId}, itemResult: ${exchangeProperty.itemResult}")
-                .bean(InventoryUpdateComponents.AsyncInventoryUpdateProcessor.class, "storeAuditRecord")
+                .bean(AsyncInventoryUpdateProcessor.class, "storeAuditRecord")
                 .to(String.format(ApplicationConstants.MONGO_INVENTORY_AUDIT_INSERT,
                         ApplicationConstants.MONGO_DATABASE, ApplicationConstants.MONGO_INVENTORY_AUDIT_WRITE_COLLECTION))
                 .log("Stored audit result: ${body}");
