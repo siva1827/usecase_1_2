@@ -51,8 +51,6 @@ public class ItemRoute extends RouteBuilder {
                 .log("Validation error: ${exception.message}")
                 .setHeader(Exchange.HTTP_RESPONSE_CODE, constant(400));
 
-
-
         onException(MongoException.class)
                 .handled(true)
                 .bean(ErrorResponseProcessor.class, "processMongoError")
@@ -73,10 +71,9 @@ public class ItemRoute extends RouteBuilder {
                 .bindingMode(RestBindingMode.json)
                 .dataFormatProperty("json.in.disableFeatures", "FAIL_ON_UNKNOWN_PROPERTIES");
 
-        // Item management routes
+        // get Item by id
         rest("/mycart/item/{itemId}")
-                .get().to(ApplicationConstants.DIRECT_PREFIX + ApplicationConstants.ENDPOINT_GET_ITEM_BY_ID)
-                .delete().to(ApplicationConstants.DIRECT_PREFIX + ApplicationConstants.ENDPOINT_DELETE_ITEM);
+                .get().to(ApplicationConstants.DIRECT_PREFIX + ApplicationConstants.ENDPOINT_GET_ITEM_BY_ID);
 
         from(ApplicationConstants.DIRECT_PREFIX + ApplicationConstants.ENDPOINT_GET_ITEM_BY_ID)
                 .routeId(ApplicationConstants.ROUTE_GET_ITEM_BY_ID)
@@ -86,20 +83,6 @@ public class ItemRoute extends RouteBuilder {
                         ApplicationConstants.MONGO_DATABASE, ApplicationConstants.MONGO_ITEM_READ_COLLECTION))
                 .bean(GetItemProcessor.class, "processResult");
 
-        from(ApplicationConstants.DIRECT_PREFIX + ApplicationConstants.ENDPOINT_DELETE_ITEM)
-                .routeId(ApplicationConstants.ROUTE_DELETE_ITEM)
-                .log("Deleting item with ID: ${header.itemId}")
-                .bean(DeleteItemProcessor.class, "setItemId")
-                .to(String.format(ApplicationConstants.MONGO_ITEM_FIND_BY_ID,
-                        ApplicationConstants.MONGO_DATABASE, ApplicationConstants.MONGO_ITEM_READ_COLLECTION))
-                .choice()
-                .when(body().isNull())
-                .bean(DeleteItemProcessor.class, "handleItemNotFound")
-                .otherwise()
-                .to(String.format(ApplicationConstants.MONGO_ITEM_DELETE,
-                        ApplicationConstants.MONGO_DATABASE, ApplicationConstants.MONGO_ITEM_WRITE_COLLECTION))
-                .bean(DeleteItemProcessor.class, "handleDeleteSuccess")
-                .end();
         //get Items by Category
         rest("/mycart/items/{categoryId}")
                 .get()
@@ -118,9 +101,7 @@ public class ItemRoute extends RouteBuilder {
                 .to(String.format(ApplicationConstants.MONGO_ITEM_AGGREGATE,
                         ApplicationConstants.MONGO_DATABASE, ApplicationConstants.MONGO_ITEM_READ_COLLECTION))
                 .bean(GetItemsByCategoryProcessor.class, "processResult");
-
         //post new Item
-
         rest("/mycart")
                 .post()
                 .consumes("application/json")
@@ -150,47 +131,7 @@ public class ItemRoute extends RouteBuilder {
                 .endChoice()
                 .endChoice();
 
-        //post new Category
-
-        rest("/mycart/category")
-                .post()
-                .consumes("application/json")
-                .to(ApplicationConstants.DIRECT_PREFIX + ApplicationConstants.ENDPOINT_POST_NEW_CATEGORY)
-                .delete("/{categoryId}")
-                .to(ApplicationConstants.DIRECT_PREFIX + ApplicationConstants.ENDPOINT_DELETE_CATEGORY);
-
-        from(ApplicationConstants.DIRECT_PREFIX + ApplicationConstants.ENDPOINT_POST_NEW_CATEGORY)
-                .routeId(ApplicationConstants.ROUTE_POST_NEW_CATEGORY)
-                .log("Received new category: ${body}")
-                .bean(PostNewCategoryProcessor.class, "validateCategory")
-                .to(String.format(ApplicationConstants.MONGO_CATEGORY_FIND_BY_ID,
-                        ApplicationConstants.MONGO_DATABASE, ApplicationConstants.MONGO_CATEGORY_READ_COLLECTION))
-                .choice()
-                .when(body().isNull())
-                .bean(PostNewCategoryProcessor.class, "prepareCategoryForInsert")
-                .to(String.format(ApplicationConstants.MONGO_CATEGORY_INSERT,
-                        ApplicationConstants.MONGO_DATABASE, ApplicationConstants.MONGO_CATEGORY_WRITE_COLLECTION))
-                .bean(PostNewCategoryProcessor.class, "handleInsertSuccess")
-                .otherwise()
-                .bean(PostNewCategoryProcessor.class, "handleExistingCategory");
-
-        from(ApplicationConstants.DIRECT_PREFIX + ApplicationConstants.ENDPOINT_DELETE_CATEGORY)
-                .routeId(ApplicationConstants.ROUTE_DELETE_CATEGORY)
-                .log("Deleting category with ID: ${header.categoryId}")
-                .bean(DeleteCategoryProcessor.class, "setCategoryId")
-                .to(String.format(ApplicationConstants.MONGO_CATEGORY_FIND_BY_ID,
-                        ApplicationConstants.MONGO_DATABASE, ApplicationConstants.MONGO_CATEGORY_READ_COLLECTION))
-                .choice()
-                .when(body().isNull())
-                .bean(DeleteCategoryProcessor.class, "handleCategoryNotFound")
-                .otherwise()
-                .to(String.format(ApplicationConstants.MONGO_CATEGORY_DELETE,
-                        ApplicationConstants.MONGO_DATABASE, ApplicationConstants.MONGO_CATEGORY_WRITE_COLLECTION))
-                .bean(DeleteCategoryProcessor.class, "handleDeleteSuccess")
-                .end();
-
         // route for sync update
-
         rest("/inventory/update")
                 .post()
                 .consumes("application/json")
@@ -231,7 +172,6 @@ public class ItemRoute extends RouteBuilder {
                 .produces("application/json")
                 .to(ApplicationConstants.DIRECT_PREFIX + ApplicationConstants.ENDPOINT_ASYNC_INVENTORY_UPDATE);
 
-        // Route for async inventory update
         from(ApplicationConstants.DIRECT_PREFIX + ApplicationConstants.ENDPOINT_ASYNC_INVENTORY_UPDATE)
                 .routeId(ApplicationConstants.ROUTE_ASYNC_INVENTORY_UPDATE)
                 .bean(PayloadValidationProcessor.class)
@@ -245,5 +185,30 @@ public class ItemRoute extends RouteBuilder {
                         ApplicationConstants.AMQ_INVENTORY_UPDATE_WRITE_QUEUE) )
                 .end()
                 .bean(AsyncInventoryUpdateProcessor.class, "buildEnqueueResponse");
+
+
+        //post new Category
+        rest("/mycart/category")
+                .post()
+                .consumes("application/json")
+                .to(ApplicationConstants.DIRECT_PREFIX + ApplicationConstants.ENDPOINT_POST_NEW_CATEGORY);
+
+        from(ApplicationConstants.DIRECT_PREFIX + ApplicationConstants.ENDPOINT_POST_NEW_CATEGORY)
+                .routeId(ApplicationConstants.ROUTE_POST_NEW_CATEGORY)
+                .log("Received new category: ${body}")
+                .bean(PostNewCategoryProcessor.class, "validateCategory")
+                .to(String.format(ApplicationConstants.MONGO_CATEGORY_FIND_BY_ID,
+                        ApplicationConstants.MONGO_DATABASE, ApplicationConstants.MONGO_CATEGORY_READ_COLLECTION))
+                .choice()
+                .when(body().isNull())
+                .bean(PostNewCategoryProcessor.class, "prepareCategoryForInsert")
+                .to(String.format(ApplicationConstants.MONGO_CATEGORY_INSERT,
+                        ApplicationConstants.MONGO_DATABASE, ApplicationConstants.MONGO_CATEGORY_WRITE_COLLECTION))
+                .bean(PostNewCategoryProcessor.class, "handleInsertSuccess")
+                .otherwise()
+                .bean(PostNewCategoryProcessor.class, "handleExistingCategory");
     }
+
+
+
 }

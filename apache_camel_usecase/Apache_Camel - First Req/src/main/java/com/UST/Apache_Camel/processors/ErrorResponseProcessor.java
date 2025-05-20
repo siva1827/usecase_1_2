@@ -13,8 +13,6 @@ public class ErrorResponseProcessor implements Processor {
 
     private static final Logger logger = LoggerFactory.getLogger(ErrorResponseProcessor.class);
 
-
-
     @Override
     public void process(Exchange exchange) throws Exception {
         Exception e = exchange.getProperty(Exchange.EXCEPTION_CAUGHT, Exception.class);
