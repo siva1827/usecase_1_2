@@ -68,7 +68,7 @@ public class ControlRefProcessor implements Processor {
 
             if (ts != null && !ts.trim().isEmpty()) {
                 try {
-                    lastProcessTs = LocalDateTime.parse(ts, FORMATTER); // Ensure correct parsing
+                    lastProcessTs = LocalDateTime.parse(ts);
                     lastProcessTsString = ts;
                     logger.info("Fetched ControlRef: _id={}, lastProcessTs={}", doc.getString("_id"), ts);
                 } catch (DateTimeParseException e) {
@@ -81,12 +81,12 @@ public class ControlRefProcessor implements Processor {
             logger.error("Expected Document for ControlRef but got: {}, query was: {}, using default: {}", 
                         body != null ? body.getClass().getSimpleName() : "null", query, DEFAULT_LAST_PROCESS_TS);
             Document initDoc = new Document("_id", DEFAULT_ID)
-                    .append("lastProcessTs", DEFAULT_LAST_PROCESS_TS.format(FORMATTER)); // Ensure default is formatted
+                    .append("lastProcessTs", lastProcessTs);
             exchange.setProperty("initControlRef", initDoc);
         }
 
         exchange.setProperty("lastProcessTs", lastProcessTs);
-        exchange.setProperty("lastProcessTsString", lastProcessTsString); // Correctly set the string property
+        exchange.setProperty("lastProcessTsString", lastProcessTs);
         logger.debug("Set exchange properties: lastProcessTs={}, lastProcessTsString={}", lastProcessTs, lastProcessTsString);
     }
 }

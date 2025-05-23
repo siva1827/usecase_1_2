@@ -16,7 +16,6 @@ import java.util.*;
 public class ItemProcessor {
     private static final Logger logger = LoggerFactory.getLogger(ItemProcessor.class);
     private static final DateTimeFormatter DATE_TIME_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
-    private static final LocalDateTime DEFAULT_LAST_PROCESS_TS = LocalDateTime.of(2025, 5, 22, 0, 0, 0);
 
     private LocalDateTime parseDate(String dateStr) {
         try {
@@ -35,15 +34,15 @@ public class ItemProcessor {
         if (lastProcessTsString != null) {
             try {
                 LocalDateTime parsedTs = parseDate(lastProcessTsString);
-                query.put("lastUpdateDate", Map.of("$gt", lastProcessTsString)); // Use the string directly
+                query.put("lastUpdateDate", Map.of("$gt", lastProcessTsString));
                 logger.info("Prepared item query with lastProcessTsString: {}, parsed: {}, query: {}", lastProcessTsString, parsedTs, query);
             } catch (DateTimeParseException e) {
-                logger.warn("Invalid lastProcessTsString format: {}, using fallback to {}", lastProcessTsString, DEFAULT_LAST_PROCESS_TS.format(DATE_TIME_FORMATTER));
-                query.put("lastUpdateDate", Map.of("$gt", DEFAULT_LAST_PROCESS_TS.format(DATE_TIME_FORMATTER)));
+                logger.warn("Invalid lastProcessTsString format: {}, using fallback to 2025-05-22 00:00:00", lastProcessTsString);
+                query.put("lastUpdateDate", Map.of("$gt", "2025-05-22 00:00:00"));
             }
         } else {
-            logger.warn("lastProcessTsString is null, using fallback to {}", DEFAULT_LAST_PROCESS_TS.format(DATE_TIME_FORMATTER));
-            query.put("lastUpdateDate", Map.of("$gt", DEFAULT_LAST_PROCESS_TS.format(DATE_TIME_FORMATTER)));
+            logger.warn("lastProcessTsString is null, using fallback to 2025-05-22 00:00:00");
+            query.put("lastUpdateDate", Map.of("$gt", "2025-05-22 00:00:00"));
         }
 
         exchange.getIn().setBody(query);
@@ -70,8 +69,8 @@ public class ItemProcessor {
         try {
             lastProcessTs = parseDate(lastProcessTsString);
         } catch (DateTimeParseException e) {
-            logger.warn("Invalid lastProcessTsString format: {}, using fallback {}", lastProcessTsString, DEFAULT_LAST_PROCESS_TS);
-            lastProcessTs = DEFAULT_LAST_PROCESS_TS;
+            logger.warn("Invalid lastProcessTsString format: {}, using fallback 2025-05-22 00:00:00", lastProcessTsString);
+            lastProcessTs = LocalDateTime.of(2025, 5, 22, 0, 0, 0);
         }
 
         for (Document item : items) {
