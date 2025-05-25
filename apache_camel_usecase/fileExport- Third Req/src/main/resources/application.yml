@@ -8,7 +8,7 @@ camel:
     file:
       target-dir: C:/export
 scheduler:
-  interval: 100000
+  interval: 10000
 logging:
   level:
     org.apache.camel: DEBUG

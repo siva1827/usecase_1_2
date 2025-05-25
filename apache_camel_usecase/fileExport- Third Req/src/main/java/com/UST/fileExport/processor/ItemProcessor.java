@@ -1,56 +1,56 @@
 package com.UST.fileExport.processor;
 
-import com.UST.fileExport.model.*;
+import com.UST.fileExport.model.ReviewXml;
+import com.UST.fileExport.model.StoreJson;
+import com.UST.fileExport.model.TrendXml;
 import org.apache.camel.Exchange;
 import org.bson.Document;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
-import java.time.LocalDateTime;
-import java.time.format.DateTimeFormatter;
-import java.time.format.DateTimeParseException;
+import java.text.ParseException;
+import java.text.SimpleDateFormat;
 import java.util.*;
 
 @Component
 public class ItemProcessor {
     private static final Logger logger = LoggerFactory.getLogger(ItemProcessor.class);
-    private static final DateTimeFormatter DATE_TIME_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
+    private static final SimpleDateFormat FORMATTER = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
 
-    private LocalDateTime parseDate(String dateStr) {
-        try {
-            LocalDateTime dateTime = LocalDateTime.parse(dateStr, DATE_TIME_FORMATTER);
-            logger.debug("Parsed date: {} to {}", dateStr, dateTime);
-            return dateTime;
-        } catch (DateTimeParseException e) {
-            throw new DateTimeParseException("Invalid date format: " + dateStr + ", expected yyyy-MM-dd HH:mm:ss", dateStr, 0, e);
+    public void setCurrentTimestamp(Exchange exchange) {
+        String currentTs;
+        synchronized (FORMATTER) {
+            currentTs = FORMATTER.format(new Date());
         }
+        exchange.setProperty("currentTs", currentTs);
+        logger.debug("Set currentTs: {}", currentTs);
     }
 
     public void prepareItemQuery(Exchange exchange) {
-        String lastProcessTsString = exchange.getProperty("lastProcessTsString", String.class);
-        Map<String, Object> query = new HashMap<>();
+        Map<String, Date> controlRefMap = exchange.getProperty("controlRefMap", Map.class);
+        Document query = new Document();
 
-        if (lastProcessTsString != null) {
-            try {
-                LocalDateTime parsedTs = parseDate(lastProcessTsString);
-                query.put("lastUpdateDate", Map.of("$gt", lastProcessTsString));
-                logger.info("Prepared item query with lastProcessTsString: {}, parsed: {}, query: {}", lastProcessTsString, parsedTs, query);
-            } catch (DateTimeParseException e) {
-                logger.warn("Invalid lastProcessTsString format: {}, using fallback to 2025-05-22 00:00:00", lastProcessTsString);
-                query.put("lastUpdateDate", Map.of("$gt", "2025-05-22 00:00:00"));
+        if (controlRefMap != null && !controlRefMap.isEmpty()) {
+            // Find the most recent lastProcessTs to filter items
+            Date latestProcessTs = Collections.max(controlRefMap.values());
+            String latestProcessTsStr;
+            synchronized (FORMATTER) {
+                latestProcessTsStr = FORMATTER.format(latestProcessTs);
             }
+            query.append("lastUpdateDate", new Document("$gt", latestProcessTsStr));
+            logger.debug("Prepared item query with lastUpdateDate > {}", latestProcessTsStr);
         } else {
-            logger.warn("lastProcessTsString is null, using fallback to 2025-05-22 00:00:00");
-            query.put("lastUpdateDate", Map.of("$gt", "2025-05-22 00:00:00"));
+            logger.warn("controlRefMap is null or empty, fetching all items");
         }
 
         exchange.getIn().setBody(query);
+        logger.debug("Prepared item query: {}", query);
     }
 
     public void filterValidItems(Exchange exchange) {
         List<Document> items = exchange.getIn().getBody(List.class);
-        String lastProcessTsString = exchange.getProperty("lastProcessTsString", String.class);
+        Map<String, Date> controlRefMap = exchange.getProperty("controlRefMap", Map.class);
         List<Document> validItems = new ArrayList<>();
 
         if (items == null || items.isEmpty()) {
@@ -59,40 +59,41 @@ public class ItemProcessor {
             return;
         }
 
-        if (lastProcessTsString == null) {
-            logger.warn("lastProcessTsString is null, cannot filter items, returning empty list");
+        if (controlRefMap == null || controlRefMap.isEmpty()) {
+            logger.warn("controlRefMap is null or empty, processing all items as new");
+            validItems.addAll(items);
             exchange.getIn().setBody(validItems);
+            logger.info("Fetched {} items, all considered valid (no ControlRef map)", items.size());
             return;
-        }
-
-        LocalDateTime lastProcessTs;
-        try {
-            lastProcessTs = parseDate(lastProcessTsString);
-        } catch (DateTimeParseException e) {
-            logger.warn("Invalid lastProcessTsString format: {}, using fallback 2025-05-22 00:00:00", lastProcessTsString);
-            lastProcessTs = LocalDateTime.of(2025, 5, 22, 0, 0, 0);
         }
 
         for (Document item : items) {
             String id = item.getString("_id");
-            String lastUpdateDate = item.getString("lastUpdateDate");
+            String lastUpdateDateStr = item.getString("lastUpdateDate");
 
-            if (lastUpdateDate == null) {
+            if (lastUpdateDateStr == null) {
                 logger.warn("Skipping item {}: lastUpdateDate is null", id);
                 continue;
             }
 
+            Date lastUpdateDate;
             try {
-                LocalDateTime itemUpdateDate = parseDate(lastUpdateDate);
-                if (itemUpdateDate.isAfter(lastProcessTs)) {
-                    validItems.add(item);
-                    logger.info("Valid item: {} with lastUpdateDate: {} (parsed: {})", id, lastUpdateDate, itemUpdateDate);
-                } else {
-                    logger.debug("Skipping item {}: lastUpdateDate {} (parsed: {}) not after lastProcessTs {} (parsed: {})",
-                            id, lastUpdateDate, itemUpdateDate, lastProcessTsString, lastProcessTs);
+                synchronized (FORMATTER) {
+                    lastUpdateDate = FORMATTER.parse(lastUpdateDateStr);
                 }
-            } catch (DateTimeParseException e) {
-                logger.warn("Skipping item {}: invalid lastUpdateDate format: {}", id, lastUpdateDate);
+            } catch (ParseException e) {
+                logger.error("Invalid lastUpdateDate format for item {}: {}", id, lastUpdateDateStr, e);
+                continue;
+            }
+
+            Date lastProcessTs = controlRefMap.get(id);
+            if (lastProcessTs == null || lastUpdateDate.after(lastProcessTs)) {
+                validItems.add(item);
+                logger.info("Valid item: {} with lastUpdateDate: {} (lastProcessTs: {})",
+                        id, lastUpdateDateStr, lastProcessTs != null ? FORMATTER.format(lastProcessTs) : "none");
+            } else {
+                logger.debug("Skipping item {}: lastUpdateDate {} not after lastProcessTs {}",
+                        id, lastUpdateDateStr, FORMATTER.format(lastProcessTs));
             }
         }
 
@@ -117,6 +118,7 @@ public class ItemProcessor {
         Document item = exchange.getIn().getBody(Document.class);
         if (item != null) {
             String categoryId = item.getString("categoryId");
+            exchange.setProperty("itemId", item.getString("_id"));
             if (categoryId != null) {
                 exchange.setProperty("item", item);
                 exchange.getIn().setBody(Map.of("_id", categoryId));
@@ -132,188 +134,83 @@ public class ItemProcessor {
         }
     }
 
-    public void prepareTrendAnalyzerXml(Exchange exchange) {
-        Document item = exchange.getProperty("item", Document.class);
-        Document category = exchange.getProperty("category", Document.class);
-        logger.debug("prepareTrendAnalyzerXml: item={}, category={}", item, category);
+    public void mapItemData(Exchange exchange) {
+        Document itemDoc = exchange.getProperty("item", Document.class);
+        Document categoryDoc = exchange.getProperty("category", Document.class);
+        String categoryName = categoryDoc != null ? categoryDoc.getString("name") : "Unknown";
 
-        if (item == null) {
-            logger.warn("Item is null in prepareTrendAnalyzerXml, skipping");
-            exchange.getIn().setBody(null);
-            return;
+        // TrendXml
+        TrendXml trendXml = new TrendXml();
+        trendXml.setItemId(itemDoc.getString("_id"));
+        trendXml.setCategoryId(itemDoc.getString("categoryId"));
+        trendXml.setCategoryName(categoryName);
+        Document stock = itemDoc.get("stockDetails", Document.class);
+        trendXml.setAvailableStock(stock != null ? stock.getInteger("availableStock", 0) : 0);
+        Document price = itemDoc.get("itemPrice", Document.class);
+        trendXml.setSellingPrice((price != null && price.get("sellingPrice") != null)
+                ? price.getInteger("sellingPrice", 0) : 0);
+
+        // ReviewXml
+        ReviewXml reviewXml = new ReviewXml();
+        reviewXml.setItemId(itemDoc.getString("_id"));
+        List<ReviewXml.Review> reviews = new ArrayList<>();
+        List<Document> reviewDocs = itemDoc.getList("review", Document.class, Collections.emptyList());
+        for (Document r : reviewDocs) {
+            ReviewXml.Review review = new ReviewXml.Review();
+            review.setReviewrating(r.getInteger("rating"));
+            review.setReviewcomment(r.getString("comment"));
+            reviews.add(review);
         }
+        reviewXml.setReviews(reviews);
 
-        String lastUpdateDate = item.getString("lastUpdateDate");
-        try {
-            parseDate(lastUpdateDate);
-        } catch (DateTimeParseException e) {
-            logger.warn("Skipping item {} due to invalid lastUpdateDate: {}", item.getString("_id"), lastUpdateDate);
-            exchange.getIn().setBody(null);
-            return;
-        }
+        // StoreJson
+        StoreJson storeJson = new StoreJson();
+        storeJson.set_id(itemDoc.getString("_id"));
+        storeJson.setItemName(itemDoc.getString("itemName"));
+        storeJson.setCategoryName(categoryName);
+        storeJson.setItemPrice(itemDoc.get("itemPrice"));
+        storeJson.setStockDetails(itemDoc.get("stockDetails"));
+        storeJson.setSpecialProduct(itemDoc.getBoolean("specialProduct", false));
 
-        Inventory inventory = new Inventory();
-        Category cat = new Category();
-        String categoryId = item.getString("categoryId") != null ? item.getString("categoryId") : "Unknown";
-        cat.setId(categoryId);
-        CategoryName catName = new CategoryName();
-        catName.setName(category != null && category.getString("name") != null ? category.getString("name") : "Unknown");
-        cat.setCategoryName(catName);
-
-        ItemXml itemXml = new ItemXml();
-        itemXml.setItemId(item.getString("_id") != null ? item.getString("_id") : "Unknown");
-        itemXml.setCategoryId(categoryId);
-
-        Integer availableStock = 0;
-        Object stockDetails = item.get("stockDetails");
-        if (stockDetails instanceof Document) {
-            Object availableStockObj = ((Document) stockDetails).get("availableStock");
-            if (availableStockObj instanceof Integer) {
-                availableStock = (Integer) availableStockObj;
-            } else if (availableStockObj instanceof String) {
-                try {
-                    availableStock = Integer.parseInt((String) availableStockObj);
-                } catch (NumberFormatException e) {
-                    logger.warn("Invalid availableStock format for item {}: {}", item.getString("_id"), availableStockObj);
-                }
-            }
-        }
-        itemXml.setAvailableStock(availableStock);
-
-        int sellingPrice = 0;
-        Object itemPrice = item.get("itemPrice");
-        if (itemPrice instanceof Document) {
-            Object sellingPriceObj = ((Document) itemPrice).get("sellingPrice");
-            if (sellingPriceObj instanceof Number) {
-                sellingPrice = ((Number) sellingPriceObj).intValue();
-            } else if (sellingPriceObj instanceof String) {
-                try {
-                    sellingPrice = Integer.parseInt((String) sellingPriceObj);
-                } catch (NumberFormatException e) {
-                    logger.warn("Invalid sellingPrice format for item {}: {}", item.getString("_id"), sellingPriceObj);
-                }
-            }
-        }
-        itemXml.setSellingPrice(sellingPrice);
-
-        cat.setItems(List.of(itemXml));
-        inventory.setCategories(List.of(cat));
-
-        exchange.getIn().setHeader("CamelFileName", String.format("trend_%s.xml", item.getString("_id")));
-        exchange.getIn().setBody(inventory);
-        logger.debug("Prepared Trend Analyzer XML for item: {}", item.getString("_id"));
+        exchange.setProperty("trendXml", trendXml);
+        exchange.setProperty("reviewXml", reviewXml);
+        exchange.setProperty("storeJson", storeJson);
+        logger.debug("Mapped item {} to TrendXml, ReviewXml, StoreJson", itemDoc.getString("_id"));
     }
 
-    public void prepareStoreFrontJson(Exchange exchange) {
-        Document item = exchange.getProperty("item", Document.class);
-        Document category = exchange.getProperty("category", Document.class);
-        logger.debug("prepareStoreFrontJson: item={}, category={}", item, category);
-
-        if (item == null) {
-            logger.warn("Item is null in prepareStoreFrontJson, skipping");
+    public void prepareTrendXml(Exchange exchange) {
+        TrendXml trendXml = exchange.getProperty("trendXml", TrendXml.class);
+        if (trendXml == null || trendXml.getItemId() == null) {
+            logger.warn("trendXml is null or invalid, skipping");
             exchange.getIn().setBody(null);
             return;
         }
-
-        String lastUpdateDate = item.getString("lastUpdateDate");
-        try {
-            parseDate(lastUpdateDate);
-        } catch (DateTimeParseException e) {
-            logger.warn("Skipping item {} due to invalid lastUpdateDate: {}", item.getString("_id"), lastUpdateDate);
-            exchange.getIn().setBody(null);
-            return;
-        }
-
-        Map<String, Object> storeFront = new LinkedHashMap<>();
-        storeFront.put("_id", item.getString("_id") != null ? item.getString("_id") : "Unknown");
-        storeFront.put("itemName", item.getString("itemName") != null ? item.getString("itemName") : "Unknown");
-        storeFront.put("categoryName", category != null && category.getString("name") != null ? category.getString("name") : "Unknown");
-
-        Map<String, Object> itemPrice = new LinkedHashMap<>();
-        Object itemPriceObj = item.get("itemPrice");
-        if (itemPriceObj instanceof Document) {
-            Document priceDoc = (Document) itemPriceObj;
-            itemPrice.put("basePrice", priceDoc.get("basePrice", 0));
-            itemPrice.put("sellingPrice", priceDoc.get("sellingPrice", 0));
-        } else {
-            itemPrice.put("basePrice", 0);
-            itemPrice.put("sellingPrice", 0);
-        }
-        storeFront.put("itemPrice", itemPrice);
-
-        Map<String, Object> stockDetails = new LinkedHashMap<>();
-        Object stockDetailsObj = item.get("stockDetails");
-        if (stockDetailsObj instanceof Document) {
-            Document stockDoc = (Document) stockDetailsObj;
-            Object availableStock = stockDoc.get("availableStock");
-            if (availableStock instanceof String) {
-                try {
-                    stockDetails.put("availableStock", Integer.parseInt((String) availableStock));
-                } catch (NumberFormatException e) {
-                    logger.warn("Invalid availableStock format for item {}: {}", item.getString("_id"), availableStock);
-                    stockDetails.put("availableStock", 0);
-                }
-            } else {
-                stockDetails.put("availableStock", stockDoc.getInteger("availableStock", 0));
-            }
-            stockDetails.put("unitOfMeasure", stockDoc.getString("unitOfMeasure") != null ? stockDoc.getString("unitOfMeasure") : "Unknown");
-        } else {
-            stockDetails.put("availableStock", 0);
-            stockDetails.put("unitOfMeasure", "Unknown");
-        }
-        storeFront.put("stockDetails", stockDetails);
-
-        storeFront.put("specialProduct", item.get("specialProduct") != null ? item.get("specialProduct") : false);
-
-        exchange.getIn().setHeader("CamelFileName", String.format("storefront_%s.json", item.getString("_id")));
-        exchange.getIn().setBody(storeFront);
-        logger.debug("Prepared StoreFront JSON for item: {}", item.getString("_id"));
+        exchange.getIn().setHeader("CamelFileName", String.format("trend_%s.xml", trendXml.getItemId()));
+        exchange.getIn().setBody(trendXml);
+        logger.debug("Prepared trend XML for item: {}", trendXml.getItemId());
     }
 
-    public void prepareReviewAggregatorXml(Exchange exchange) {
-        Document item = exchange.getProperty("item", Document.class);
-        if (item == null) {
-            logger.warn("Item is null in prepareReviewAggregatorXml, skipping");
+    public void prepareStoreJson(Exchange exchange) {
+        StoreJson storeJson = exchange.getProperty("storeJson", StoreJson.class);
+        if (storeJson == null || storeJson.get_id() == null) {
+            logger.warn("storeJson is null or invalid, skipping");
             exchange.getIn().setBody(null);
             return;
         }
+        exchange.getIn().setHeader("CamelFileName", String.format("storefront_%s.json", storeJson.get_id()));
+        exchange.getIn().setBody(storeJson);
+        logger.debug("Prepared store JSON for item: {}", storeJson.get_id());
+    }
 
-        String lastUpdateDate = item.getString("lastUpdateDate");
-        try {
-            parseDate(lastUpdateDate);
-        } catch (DateTimeParseException e) {
-            logger.warn("Skipping item {} due to invalid lastUpdateDate: {}", item.getString("_id"), lastUpdateDate);
+    public void prepareReviewXml(Exchange exchange) {
+        ReviewXml reviewXml = exchange.getProperty("reviewXml", ReviewXml.class);
+        if (reviewXml == null || reviewXml.getItemId() == null) {
+            logger.warn("reviewXml is null or invalid, skipping");
             exchange.getIn().setBody(null);
             return;
         }
-
-        List<Document> reviewDocs = item.getList("review", Document.class, Collections.emptyList());
-        Reviews reviews = new Reviews();
-        ReviewItem reviewItem = new ReviewItem();
-        reviewItem.setId(item.getString("_id"));
-
-        List<Review> reviewList = new ArrayList<>();
-        for (Document rev : reviewDocs) {
-            Review review = new Review();
-            Object ratingObj = rev.get("rating");
-            if (ratingObj instanceof String) {
-                try {
-                    review.setReviewRating(Integer.parseInt((String) ratingObj));
-                } catch (NumberFormatException e) {
-                    logger.warn("Invalid rating format for item {}: {}", item.getString("_id"), ratingObj);
-                    review.setReviewRating(0);
-                }
-            } else {
-                review.setReviewRating(rev.getInteger("rating", 0));
-            }
-            review.setReviewComment(rev.getString("comment"));
-            reviewList.add(review);
-        }
-        reviewItem.setReviews(reviewList);
-        reviews.setItems(List.of(reviewItem));
-
-        exchange.getIn().setHeader("CamelFileName", String.format("review_%s.xml", item.getString("_id")));
-        exchange.getIn().setBody(reviews);
-        logger.debug("Prepared Review Aggregator XML for item: {}", item.getString("_id"));
+        exchange.getIn().setHeader("CamelFileName", String.format("review_%s.xml", reviewXml.getItemId()));
+        exchange.getIn().setBody(reviewXml);
+        logger.debug("Prepared review XML for item: {}", reviewXml.getItemId());
     }
 }
