@@ -12,7 +12,7 @@ public class Item {
     private String id;
     private String itemName;
     private String categoryId;
-    private LocalDateTime lastUpdateDate; // Changed to LocalDateTime
+    private String lastUpdateDate; // Changed to LocalDateTime
     private ItemPrice itemPrice;
     private StockDetails stockDetails;
     private boolean specialProduct;
@@ -44,11 +44,11 @@ public class Item {
         this.categoryId = categoryId;
     }
 
-    public LocalDateTime getLastUpdateDate() {
+    public String getLastUpdateDate() {
         return lastUpdateDate;
     }
 
-    public void setLastUpdateDate(LocalDateTime lastUpdateDate) {
+    public void setLastUpdateDate(String lastUpdateDate) {
         this.lastUpdateDate = lastUpdateDate;
     }
 
