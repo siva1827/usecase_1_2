@@ -15,7 +15,11 @@ public final class ApplicationConstants {
     public static final String MONGO_CATEGORY_READ_COLLECTION = "category";
     public static final String MONGO_CATEGORY_WRITE_COLLECTION = "category";
     public static final String MONGO_INVENTORY_AUDIT_WRITE_COLLECTION = "inventory_audit";
+    public static final String MONGO_INVENTORY_AUDIT_READ_COLLECTION = "inventory_audit";
 
+    public static final String MONGO_AUDIT_FIND_BY_CORRELATION_ID =
+            "mongodb:mongoBean?database=%s&collection=%s&operation=findAll";
+    ;
     // MongoDB Endpoint URIs
     public static final String MONGO_ITEM_FIND_BY_ID = "mongodb:mongoClient?database=%s&collection=%s&operation=findById";
     public static final String MONGO_ITEM_AGGREGATE = "mongodb:mongoClient?database=%s&collection=%s&operation=aggregate";
@@ -37,7 +41,7 @@ public final class ApplicationConstants {
     // REST Configuration
     public static final String REST_HOST = "0.0.0.0";
     public static final String REST_PORT = "8082";
-    public static final String REST_COMPONENT = "netty-http";
+    public static final String REST_COMPONENT = "servlet";
 
     // Error Messages
     public static final String ERROR_ITEM_NOT_FOUND = "Item not found";

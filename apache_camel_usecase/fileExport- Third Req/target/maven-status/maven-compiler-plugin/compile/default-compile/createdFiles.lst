@@ -1,0 +1,10 @@
+com\UST\fileExport\model\TrendXml.class
+com\UST\fileExport\config\ApplicationConstants.class
+com\UST\fileExport\config\MongoConfig.class
+com\UST\fileExport\model\ReviewXml.class
+com\UST\fileExport\model\ReviewXml$Review.class
+com\UST\fileExport\processor\ControlRefProcessor.class
+com\UST\fileExport\model\StoreJson.class
+com\UST\fileExport\FileExportApplication.class
+com\UST\fileExport\route\FileExportRoute.class
+com\UST\fileExport\processor\ItemProcessor.class

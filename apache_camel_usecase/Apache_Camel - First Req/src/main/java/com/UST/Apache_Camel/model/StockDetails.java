@@ -2,18 +2,17 @@ package com.UST.Apache_Camel.model;
 
 public class StockDetails {
 
-    private int availableStock;
+    private Integer  availableStock;
     private String unitOfMeasure;
-    private int soldOut;
-    private int damaged;
+
 
     // Getters and Setters
 
-    public int getAvailableStock() {
+    public Integer getAvailableStock() {
         return availableStock;
     }
 
-    public void setAvailableStock(int availableStock) {
+    public void setAvailableStock(Integer availableStock) {
         this.availableStock = availableStock;
     }
 
@@ -25,19 +24,4 @@ public class StockDetails {
         this.unitOfMeasure = unitOfMeasure;
     }
 
-    public int getSoldOut() {
-        return soldOut;
-    }
-
-    public void setSoldOut(int soldOut) {
-        this.soldOut = soldOut;
-    }
-
-    public int getDamaged() {
-        return damaged;
-    }
-
-    public void setDamaged(int damaged) {
-        this.damaged = damaged;
-    }
 }

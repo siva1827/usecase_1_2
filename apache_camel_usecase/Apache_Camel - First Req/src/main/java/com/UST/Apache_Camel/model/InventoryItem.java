@@ -1,15 +1,43 @@
 package com.UST.Apache_Camel.model;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
 import lombok.Getter;
 import lombok.Setter;
 
+import java.io.Serializable;
+
 @Setter
 @Getter
-public class InventoryItem {
+public class InventoryItem implements Serializable {
 
-    private String id;  // Changed to `id` for consistency
-    private StockDetails stockDetails;
+    private static final long serialVersionUID = 1L;
 
-    // Getters and Setters
+    @JsonProperty("_id")
+    private String id;
+    private StockUpdateDetails stockDetails;
+
+    public InventoryItem(String id, StockUpdateDetails stockDetails) {
+        this.id = id;
+        this.stockDetails = stockDetails;
+    }
+
+    public String getId() {
+        return id;
+    }
+
+    public void setId(String id) {
+        this.id = id;
+    }
+
+    public StockUpdateDetails getStockDetails() {
+        return stockDetails;
+    }
+
+    public void setStockDetails(StockUpdateDetails stockDetails) {
+        this.stockDetails = stockDetails;
+    }
+
+    public InventoryItem() {
+    }
 
 }

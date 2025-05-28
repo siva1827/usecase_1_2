@@ -1,50 +1,62 @@
 package com.UST.Apache_Camel.processors;
 
 import com.UST.Apache_Camel.config.ApplicationConstants;
+import com.UST.Apache_Camel.model.Category;
 import org.apache.camel.Exchange;
-import org.apache.camel.Processor;
+import org.bson.Document;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.Map;
 
-public class PostNewCategoryProcessor implements Processor {
+public class PostNewCategoryProcessor {
     private static final Logger logger = LoggerFactory.getLogger(PostNewCategoryProcessor.class);
 
-    @Override
-    public void process(Exchange exchange) throws Exception {
-    }
-
     public void validateCategory(Exchange exchange) throws Exception {
-        Map<String, Object> category = exchange.getIn().getBody(Map.class);
+        Category category = exchange.getIn().getBody(Category.class);
         exchange.setProperty("newCategory", category);
 
-        String categoryId = (String) category.get("_id");
-        String categoryName = (String) category.get("categoryName");
-
-        if (categoryId == null || categoryId.isBlank() || categoryName == null || categoryName.isBlank()) {
+        if (category == null || category.getId() == null || category.getId().isBlank() ||
+            category.getCategoryName() == null || category.getCategoryName().isBlank()) {
             throw new IllegalArgumentException("Category ID and Category Name must not be empty");
         }
 
+        String categoryId = category.getId();
         exchange.getIn().setBody(categoryId);
         logger.debug("Validated category and set categoryId for findById: {}", categoryId);
     }
 
     public void prepareCategoryForInsert(Exchange exchange) {
-        Map<String, Object> category = exchange.getProperty("newCategory", Map.class);
-        exchange.getIn().setBody(category);
-        logger.debug("Prepared category for insert: {}", category.get("_id"));
+        Category category = exchange.getProperty("newCategory", Category.class);
+
+        // Convert Category to Document for MongoDB
+        Document document = new Document();
+        document.append("_id", category.getId());
+        document.append("categoryName", category.getCategoryName());
+        if (category.getCategoryDep() != null) {
+            document.append("categoryDep", category.getCategoryDep());
+        }
+        if (category.getCategoryTax() != null) {
+            document.append("categoryTax", category.getCategoryTax());
+        }
+
+        exchange.getIn().setBody(document);
+        logger.debug("Prepared category for insert: {}", category.getId());
     }
 
     public void handleInsertSuccess(Exchange exchange) {
+        Category category = exchange.getProperty("newCategory", Category.class);
         exchange.getIn().setHeader(Exchange.HTTP_RESPONSE_CODE, 201);
-        exchange.getIn().setBody(Map.of("message", "Category inserted successfully"));
-        logger.info("Successfully inserted category: {}", exchange.getProperty("newCategory", Map.class).get("_id"));
+        exchange.getIn().setBody(Map.of(
+                "message", "Category inserted successfully",
+                "categoryId", category.getId()
+        ));
+        logger.info("Successfully inserted category: {}", category.getId());
     }
 
     public void handleExistingCategory(Exchange exchange) {
         exchange.getIn().setHeader(Exchange.HTTP_RESPONSE_CODE, 400);
         exchange.getIn().setBody(Map.of("message", ApplicationConstants.ERROR_CATEGORY_ALREADY_EXISTS));
-        logger.warn("Category already exists: {}", exchange.getProperty("newCategory", Map.class).get("_id"));
+        logger.warn("Category already exists: {}", exchange.getProperty("newCategory", Category.class).getId());
     }
 }

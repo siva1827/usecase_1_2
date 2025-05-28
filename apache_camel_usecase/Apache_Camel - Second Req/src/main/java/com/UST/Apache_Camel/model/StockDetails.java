@@ -4,8 +4,7 @@ public class StockDetails {
 
     private int availableStock;
     private String unitOfMeasure;
-    private int soldOut;
-    private int damaged;
+
 
     // Getters and Setters
 
@@ -25,19 +24,4 @@ public class StockDetails {
         this.unitOfMeasure = unitOfMeasure;
     }
 
-    public int getSoldOut() {
-        return soldOut;
-    }
-
-    public void setSoldOut(int soldOut) {
-        this.soldOut = soldOut;
-    }
-
-    public int getDamaged() {
-        return damaged;
-    }
-
-    public void setDamaged(int damaged) {
-        this.damaged = damaged;
-    }
 }

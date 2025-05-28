@@ -1,5 +1,6 @@
 package com.UST.Apache_Camel.processors;
 
+import com.UST.Apache_Camel.model.ItemResult;
 import org.apache.camel.Exchange;
 import org.apache.camel.Processor;
 import org.slf4j.Logger;
@@ -14,12 +15,12 @@ public class FinalResponseProcessor implements Processor {
 
     @Override
     public void process(Exchange exchange) throws Exception {
-        List<Map<String, Object>> itemResults = exchange.getProperty("itemResults", List.class);
+        List<ItemResult> itemResults = exchange.getProperty("itemResults", List.class);
         if (itemResults == null) {
             itemResults = new ArrayList<>();
             logger.warn("itemResults is null in final response, initializing as empty list");
         }
-        String status = itemResults.stream().allMatch(r -> "success".equals(r.get("status"))) ? "completed" : "partial";
+        String status = itemResults.stream().allMatch(r -> "success".equals(r.getStatus())) ? "completed" : "partial";
         logger.info("Final response itemResults: {}, status: {}", itemResults, status);
         exchange.getMessage().setBody(Map.of(
                 "status", status,

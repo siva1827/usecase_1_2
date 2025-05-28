@@ -8,7 +8,7 @@ import lombok.Setter;
 public class InventoryItem {
 
     private String id;  // Changed to `id` for consistency
-    private StockDetails stockDetails;
+    private StockUpdateDetails stockDetails;
 
     // Getters and Setters
 

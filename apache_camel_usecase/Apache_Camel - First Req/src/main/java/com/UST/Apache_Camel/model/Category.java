@@ -1,6 +1,6 @@
 package com.UST.Apache_Camel.model;
 
-
+import com.fasterxml.jackson.annotation.JsonProperty;
 import org.springframework.data.annotation.Id;
 import org.springframework.data.mongodb.core.mapping.Document;
 
@@ -8,13 +8,13 @@ import org.springframework.data.mongodb.core.mapping.Document;
 public class Category {
 
     @Id
+    @JsonProperty("_id")
     private String id;
     private String categoryName;
     private String categoryDep;
     private String categoryTax;
 
     // Getters and Setters
-
     public String getId() {
         return id;
     }

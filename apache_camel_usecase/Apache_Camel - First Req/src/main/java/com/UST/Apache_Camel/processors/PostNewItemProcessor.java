@@ -2,44 +2,47 @@ package com.UST.Apache_Camel.processors;
 
 import com.UST.Apache_Camel.config.ApplicationConstants;
 import com.UST.Apache_Camel.exception.InventoryValidationException;
+import com.UST.Apache_Camel.model.Item;
+import com.UST.Apache_Camel.model.ItemPrice;
+import com.UST.Apache_Camel.model.Review;
+import com.UST.Apache_Camel.model.StockDetails;
 import org.apache.camel.Exchange;
-import org.apache.camel.Processor;
+import org.bson.Document;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
+import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
-public class PostNewItemProcessor implements Processor {
+public class PostNewItemProcessor {
     private static final Logger logger = LoggerFactory.getLogger(PostNewItemProcessor.class);
+    private static final DateTimeFormatter DATE_TIME_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
     public void validateItem(Exchange exchange) throws Exception {
-        Map<String, Object> item = exchange.getIn().getBody(Map.class);
+        Item item = exchange.getIn().getBody(Item.class);
         exchange.setProperty("newItem", item);
-        if (item == null || item.get("_id") == null || item.get("itemPrice") == null || item.get("stockDetails") == null) {
-            throw new InventoryValidationException("Item must have '_id', 'itemPrice', and 'stockDetails'");
+
+        // Validate required fields
+        if (item == null || item.getId() == null || item.getItemName() == null ||
+            item.getCategoryId() == null || item.getItemPrice() == null || 
+            item.getStockDetails() == null) {
+            throw new InventoryValidationException("Item must have '_id', 'itemName', 'categoryId', 'itemPrice', and 'stockDetails'");
         }
 
-        String itemId = item.get("_id").toString();
-        Map<String, Object> price = (Map<String, Object>) item.get("itemPrice");
-        Map<String, Object> stock = (Map<String, Object>) item.get("stockDetails");
+        String itemId = item.getId();
+        ItemPrice price = item.getItemPrice();
+        StockDetails stock = item.getStockDetails();
 
         // Validate itemPrice
-        if (!price.containsKey("basePrice") || !price.containsKey("sellingPrice")) {
+        if (price.getBasePrice() == null || price.getSellingPrice() == null) {
             throw new InventoryValidationException("itemPrice must contain 'basePrice' and 'sellingPrice' for item: " + itemId);
         }
 
-        Object basePriceObj = price.get("basePrice");
-        Object sellingPriceObj = price.get("sellingPrice");
-
-        if (!(basePriceObj instanceof Number)) {
-            throw new InventoryValidationException("basePrice must be a number for item: " + itemId + ", found: " + basePriceObj.getClass().getSimpleName());
-        }
-        if (!(sellingPriceObj instanceof Number)) {
-            throw new InventoryValidationException("sellingPrice must be a number for item: " + itemId + ", found: " + sellingPriceObj.getClass().getSimpleName());
-        }
-
-        double basePrice = ((Number) basePriceObj).doubleValue();
-        double sellingPrice = ((Number) sellingPriceObj).doubleValue();
+        double basePrice = price.getBasePrice().doubleValue();
+        double sellingPrice = price.getSellingPrice().doubleValue();
 
         if (basePrice <= 0) {
             throw new InventoryValidationException("basePrice must be greater than zero for item: " + itemId);
@@ -49,42 +52,13 @@ public class PostNewItemProcessor implements Processor {
         }
 
         // Validate stockDetails
-        if (!stock.containsKey("availableStock") || !stock.containsKey("soldOut") || !stock.containsKey("damaged")) {
-            throw new InventoryValidationException("stockDetails must contain 'availableStock', 'soldOut', and 'damaged' for item: " + itemId);
+        if (stock.getAvailableStock() == null || stock.getUnitOfMeasure() == null) {
+            throw new InventoryValidationException("stockDetails must contain 'availableStock' and 'unitOfMeasure' for item: " + itemId);
         }
 
-        Object availableStockObj = stock.get("availableStock");
-        Object soldOutObj = stock.get("soldOut");
-        Object damagedObj = stock.get("damaged");
-
-        if (!(availableStockObj instanceof Integer)) {
-            throw new InventoryValidationException("availableStock must be an integer for item: " + itemId + ", found: " + availableStockObj.getClass().getSimpleName());
-        }
-        if (!(soldOutObj instanceof Integer)) {
-            throw new InventoryValidationException("soldOut must be an integer for item: " + itemId + ", found: " + soldOutObj.getClass().getSimpleName());
-        }
-        if (!(damagedObj instanceof Integer)) {
-            throw new InventoryValidationException("damaged must be an integer for item: " + itemId + ", found: " + damagedObj.getClass().getSimpleName());
-        }
-
-        int availableStock = (Integer) availableStockObj;
-        int soldOut = (Integer) soldOutObj;
-        int damaged = (Integer) damagedObj;
-
+        Integer availableStock = stock.getAvailableStock();
         if (availableStock < 0) {
             throw new InventoryValidationException("availableStock cannot be negative for item: " + itemId);
-        }
-        if (soldOut < 0) {
-            throw new InventoryValidationException("soldOut cannot be negative for item: " + itemId);
-        }
-        if (damaged < 0) {
-            throw new InventoryValidationException("damaged cannot be negative for item: " + itemId);
-        }
-
-        // Validate specialProduct
-        Object specialProductObj = item.get("specialProduct");
-        if (specialProductObj != null && !(specialProductObj instanceof Boolean)) {
-            throw new InventoryValidationException("specialProduct must be a boolean for item: " + itemId + ", found: " + specialProductObj.getClass().getSimpleName());
         }
 
         exchange.getIn().setBody(itemId);
@@ -94,13 +68,13 @@ public class PostNewItemProcessor implements Processor {
     public void handleExistingItem(Exchange exchange) {
         exchange.getIn().setHeader(Exchange.HTTP_RESPONSE_CODE, 400);
         exchange.getIn().setBody(Map.of("message", ApplicationConstants.ERROR_ITEM_ALREADY_EXISTS));
-        logger.warn("Item already exists: {}", exchange.getProperty("newItem", Map.class).get("_id"));
+        logger.warn("Item already exists: {}", exchange.getProperty("newItem", Item.class).getId());
     }
 
     public void setCategoryId(Exchange exchange) {
-        Map<String, Object> item = exchange.getProperty("newItem", Map.class);
+        Item item = exchange.getProperty("newItem", Item.class);
         exchange.setProperty("validatedItem", item);
-        String categoryId = (String) item.get("categoryId");
+        String categoryId = item.getCategoryId();
         exchange.getIn().setBody(categoryId);
         logger.debug("Set categoryId for findById: {}", categoryId);
     }
@@ -108,22 +82,55 @@ public class PostNewItemProcessor implements Processor {
     public void handleInvalidCategory(Exchange exchange) {
         exchange.getIn().setHeader(Exchange.HTTP_RESPONSE_CODE, 400);
         exchange.getIn().setBody(Map.of("message", ApplicationConstants.ERROR_CATEGORY_NOT_FOUND));
-        logger.warn("Invalid category for item: {}", exchange.getProperty("validatedItem", Map.class).get("_id"));
+        logger.warn("Invalid category for item: {}", exchange.getProperty("validatedItem", Item.class).getId());
     }
 
     public void prepareItemForInsert(Exchange exchange) {
-        Map<String, Object> item = exchange.getProperty("validatedItem", Map.class);
-        exchange.getIn().setBody(item);
-        logger.debug("Prepared item for insert: {}", item.get("_id"));
+        Item item = exchange.getProperty("validatedItem", Item.class);
+        item.setLastUpdateDate(LocalDateTime.now());
+
+        // Convert Item to Document for MongoDB
+        Document document = new Document();
+        document.append("_id", item.getId());
+        document.append("itemName", item.getItemName());
+        document.append("categoryId", item.getCategoryId());
+        document.append("lastUpdateDate", item.getLastUpdateDate().format(DATE_TIME_FORMATTER));
+        
+        Document priceDoc = new Document();
+        priceDoc.append("basePrice", item.getItemPrice().getBasePrice());
+        priceDoc.append("sellingPrice", item.getItemPrice().getSellingPrice());
+        document.append("itemPrice", priceDoc);
+
+        Document stockDoc = new Document();
+        stockDoc.append("availableStock", item.getStockDetails().getAvailableStock());
+        stockDoc.append("unitOfMeasure", item.getStockDetails().getUnitOfMeasure());
+        document.append("stockDetails", stockDoc);
+
+        document.append("specialProduct", item.isSpecialProduct());
+
+        if (item.getReview() != null && !item.getReview().isEmpty()) {
+            List<Document> reviewDocs = item.getReview().stream()
+                    .map(review -> new Document()
+                            .append("rating", review.getRating())
+                            .append("comment", review.getComment()))
+                    .collect(Collectors.toList());
+            document.append("review", reviewDocs);
+        } else {
+            document.append("review", List.of());
+        }
+
+        exchange.getIn().setBody(document);
+        logger.debug("Prepared item for insert: {}, lastUpdateDate: {}", 
+                item.getId(), item.getLastUpdateDate().format(DATE_TIME_FORMATTER));
     }
 
     public void handleInsertSuccess(Exchange exchange) {
+        Item item = exchange.getProperty("validatedItem", Item.class);
         exchange.getIn().setHeader(Exchange.HTTP_RESPONSE_CODE, 201);
-        exchange.getIn().setBody(Map.of("message", "Item inserted successfully"));
-        logger.info("Successfully inserted item: {}", exchange.getProperty("validatedItem", Map.class).get("_id"));
-    }
-
-    @Override
-    public void process(Exchange exchange) throws Exception {
+        exchange.getIn().setBody(Map.of(
+                "itemId", item.getId(),
+                "message", "Item inserted successfully"
+        ));
+        logger.info("Successfully inserted item: {}", item.getId());
     }
 }

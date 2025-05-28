@@ -1,7 +1,10 @@
 package com.UST.Apache_Camel.model;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
 import org.springframework.data.annotation.Id;
 import org.springframework.data.mongodb.core.mapping.Document;
+
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
 
@@ -9,6 +12,7 @@ import java.util.List;
 public class Item {
 
     @Id
+    @JsonProperty("_id")
     private String id;
     private String itemName;
     private String categoryId;
